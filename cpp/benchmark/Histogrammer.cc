@@ -1,6 +1,10 @@
 #include "Histogrammer.hh"
 
+#include <cmath>
+#include <cstdlib>
 #include <memory>
+#include <sstream>
+#include <stdexcept>
 #include <utility>
 
 #include <TFile.h>
@@ -125,27 +129,38 @@ void Histogrammer::process_event(HepMC3::GenEvent &event) {
         throw std::runtime_error(msg.str());
     }
 
-    auto mom_one = beam_particles[0]->momentum();
-    auto mom_two = beam_particles[1]->momentum();
-    auto pdg_one = beam_particles[0]->pdg_id();
-    auto pdg_two = beam_particles[1]->pdg_id();
-    auto vtx_one = beam_particles[0]->end_vertex();
-    auto vtx_two = beam_particles[1]->end_vertex();
-    // Note here, for many HepMC3 files these vtx_one and vtx_two might be 2 different objects.
+    // --- identify beams by species, not by record order ---
+    auto is_lepton = [](int pdg) { return std::abs(pdg) == 11 || std::abs(pdg) == 13; };
+
+    std::shared_ptr<const HepMC3::GenParticle> lepton = nullptr;
+    std::shared_ptr<const HepMC3::GenParticle> hadron = nullptr;
+    for (const auto &bp : beam_particles) {
+        if (is_lepton(bp->pdg_id())) lepton = bp;
+        else                        hadron = bp;
+    }
+    if (!lepton || !hadron) {
+        throw std::runtime_error("Could not identify one lepton and one hadron beam (status==4)");
+    }
+
+    auto mom_had = hadron->momentum();
+    auto mom_lep = lepton->momentum();
+    auto vtx_had = hadron->end_vertex();
+    auto vtx_lep = lepton->end_vertex();
+    // Note here, for many HepMC3 files these vertices might be 2 different objects.
     // We assume here that their x,y,z are identical
 
-    if(_verbose && vtx_one && vtx_two) {
-        printf("vtx1 %7.1f %7.1f %7.1f    vtx2 %7.1f %7.1f %7.1f\n",
-               vtx_one->position().x(), vtx_one->position().y(), vtx_one->position().z(),
-               vtx_two->position().x(), vtx_two->position().y(), vtx_two->position().z());
+    if(_verbose && vtx_had && vtx_lep) {
+        printf("had vtx %7.1f %7.1f %7.1f    lep vtx %7.1f %7.1f %7.1f\n",
+               vtx_had->position().x(), vtx_had->position().y(), vtx_had->position().z(),
+               vtx_lep->position().x(), vtx_lep->position().y(), vtx_lep->position().z());
 
     }
 
-    if(vtx_one) {
-        vtxX->Fill(vtx_one->position().x());
-        vtxY->Fill(vtx_one->position().y());
-        vtxZ->Fill(vtx_one->position().z());
-        vtxT->Fill(vtx_one->position().t());
+    if(vtx_had) {
+        vtxX->Fill(vtx_had->position().x());
+        vtxY->Fill(vtx_had->position().y());
+        vtxZ->Fill(vtx_had->position().z());
+        vtxT->Fill(vtx_had->position().t());
     } else {
         vtxX->Fill(0.0);
         vtxY->Fill(0.0);
@@ -153,11 +168,11 @@ void Histogrammer::process_event(HepMC3::GenEvent &event) {
         vtxT->Fill(0.0);
     }
 
-    if(vtx_two) {
-        vtx2X->Fill(vtx_two->position().x());
-        vtx2Y->Fill(vtx_two->position().y());
-        vtx2Z->Fill(vtx_two->position().z());
-        vtx2T->Fill(vtx_two->position().t());
+    if(vtx_lep) {
+        vtx2X->Fill(vtx_lep->position().x());
+        vtx2Y->Fill(vtx_lep->position().y());
+        vtx2Z->Fill(vtx_lep->position().z());
+        vtx2T->Fill(vtx_lep->position().t());
     } else {
         vtx2X->Fill(0.0);
         vtx2Y->Fill(0.0);
@@ -165,12 +180,16 @@ void Histogrammer::process_event(HepMC3::GenEvent &event) {
         vtx2T->Fill(0.0);
     }
 
-    atan2PxPz1Hist->Fill(TMath::ATan2(mom_one.px(),mom_one.pz()));
-    atan2PyPz1Hist->Fill(TMath::ATan2(mom_one.py(),mom_one.pz()));
-    atan2PyPtot1Hist->Fill(TMath::ATan2(mom_one.py(), mom_one.length()));
+    // --- direction-independent divergence angles ---
+    // atan2(p_t, |pz|) gives the small angle w.r.t. the beam axis regardless of +z/-z travel
+    auto ang = [](double p_t, double pz) { return TMath::ATan2(p_t, std::abs(pz)); };
 
-    atan2PxPz2Hist->Fill(TMath::ATan2(mom_two.px(),(-1.0)*mom_two.pz()));
-    atan2PyPz2Hist->Fill(TMath::ATan2(mom_two.py(),(-1.0)*mom_two.pz()));
+    atan2PxPz1Hist  ->Fill(ang(mom_had.px(), mom_had.pz()));
+    atan2PyPz1Hist  ->Fill(ang(mom_had.py(), mom_had.pz()));
+    atan2PyPtot1Hist->Fill(TMath::ATan2(mom_had.py(), mom_had.length()));
+
+    atan2PxPz2Hist  ->Fill(ang(mom_lep.px(), mom_lep.pz()));
+    atan2PyPz2Hist  ->Fill(ang(mom_lep.py(), mom_lep.pz()));
 
 //    vtxYvsX->Fill(p8.process[0].xProd(),p8.process[0].yProd());
 //    vtxXvsT->Fill(p8.process[0].tProd(),p8.process[0].xProd());
