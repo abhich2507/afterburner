@@ -8,4 +8,4 @@ python/.ipynb_checkpoints/
 *.log
 
 build/
-*root
+*.root
